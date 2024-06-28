@@ -6,6 +6,7 @@ git clone https://www.modelscope.cn/AI-ModelScope/bge-small-zh-v1.5.git demo/BAA
 # download dataset
 git clone https://www.modelscope.cn/datasets/issaccv/aiops2024-challenge-dataset.git demo/dataset
 
+# 注意 data更换为我们自己的数据
 mv demo/dataset/question.jsonl demo/question.jsonl
 
 unzip demo/dataset/data.zip -d demo/

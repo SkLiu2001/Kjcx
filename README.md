@@ -85,6 +85,10 @@ python main.py
 
 生成的答案会放置在`./submit_result.jsonl`
 
+# 注意！
+因为BCEembedding与llama index的版本冲突，需要手动更改BCEembedding的源码
+llamaindex版本更新后有些包移到core里了，请根据报错自行更改
+
 
 # 我们的更改
 
