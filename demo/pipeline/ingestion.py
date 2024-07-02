@@ -33,14 +33,26 @@ def read_data(path: str = "data") -> list[Document]:
 
 
 
-sparse_tokenizer = AutoTokenizer.from_pretrained(
-    "/home/liusk-s24/data/model/bge_m3"
+# sparse_tokenizer = AutoTokenizer.from_pretrained(
+#     "/home/liusk-s24/data/model/bge_m3"
+# )
+# sparse_model = AutoModelForMaskedLM.from_pretrained(
+#     "/home/liusk-s24/data/model/bge_m3"
+# )
+
+doc_tokenizer = AutoTokenizer.from_pretrained(
+    "/home/liusk-s24/data/model/efficient-splade-VI-BT-large-doc"
 )
-sparse_model = AutoModelForMaskedLM.from_pretrained(
-    "/home/liusk-s24/data/model/bge_m3"
+doc_model = AutoModelForMaskedLM.from_pretrained(
+    "/home/liusk-s24/data/model/efficient-splade-VI-BT-large-doc"
 )
 
-
+query_tokenizer = AutoTokenizer.from_pretrained(
+    "/home/liusk-s24/data/model/efficient-splade-VI-BT-large-query"
+)
+query_model = AutoModelForMaskedLM.from_pretrained(
+    "/home/liusk-s24/data/model/efficient-splade-VI-BT-large-query"
+)
 # def sparse_vectors_fn(
 #     texts: List[str],
 # ) -> Tuple[List[List[int]], List[List[float]]]:
@@ -103,6 +115,73 @@ def sparse_vectors_fn(texts: List[str], batch_size: int = 1) -> Tuple[List[List[
 
     return indices, vecs
 
+def sparse_doc_vectors(texts: List[str], batch_size: int = 1) -> Tuple[List[List[int]], List[List[float]]]:
+    """
+    Computes vectors from logits and attention mask using ReLU, log, and max operations.
+    """
+    indices = []
+    vecs = []
+
+    if torch.cuda.is_available():
+        doc_model.to("cuda:1")
+
+    for i in tqdm(range(0, len(texts), batch_size)):
+        batch_texts = texts[i:i + batch_size]
+        tokens = doc_tokenizer(
+            batch_texts, truncation=True, padding=True, return_tensors="pt"
+        )
+        if torch.cuda.is_available():
+            tokens = {key: value.to("cuda:1") for key, value in tokens.items()}
+
+        output = doc_model(**tokens)
+        logits, attention_mask = output.logits, tokens['attention_mask']
+        relu_log = torch.log(1 + torch.relu(logits))
+        weighted_log = relu_log * attention_mask.unsqueeze(-1)
+        tvecs, _ = torch.max(weighted_log, dim=1)
+
+        for batch in tvecs:
+            indices.append(batch.nonzero(as_tuple=True)[0].tolist())
+            vecs.append(batch[indices[-1]].tolist())
+
+        # 释放不再需要的张量
+        del tokens, output, logits, attention_mask, relu_log, weighted_log, tvecs
+        torch.cuda.empty_cache()
+
+    return indices, vecs
+
+def sparse_query_vectors(texts: List[str], batch_size: int = 1) -> Tuple[List[List[int]], List[List[float]]]:
+    """
+    Computes vectors from logits and attention mask using ReLU, log, and max operations.
+    """
+    indices = []
+    vecs = []
+
+    if torch.cuda.is_available():
+        query_model.to("cuda:1")
+
+    for i in range(0, len(texts), batch_size):
+        batch_texts = texts[i:i + batch_size]
+        tokens = query_tokenizer(
+            batch_texts, truncation=True, padding=True, return_tensors="pt"
+        )
+        if torch.cuda.is_available():
+            tokens = {key: value.to("cuda:1") for key, value in tokens.items()}
+
+        output = query_model(**tokens)
+        logits, attention_mask = output.logits, tokens['attention_mask']
+        relu_log = torch.log(1 + torch.relu(logits))
+        weighted_log = relu_log * attention_mask.unsqueeze(-1)
+        tvecs, _ = torch.max(weighted_log, dim=1)
+
+        for batch in tvecs:
+            indices.append(batch.nonzero(as_tuple=True)[0].tolist())
+            vecs.append(batch[indices[-1]].tolist())
+
+        # 释放不再需要的张量
+        del tokens, output, logits, attention_mask, relu_log, weighted_log, tvecs
+        torch.cuda.empty_cache()
+
+    return indices, vecs
 
 
 def build_pipeline(
@@ -216,8 +295,8 @@ def build_vector_store(
                 parallel=4,
                 batch_size=32,
                 enable_hybrid=True,
-                sparse_doc_fn=sparse_vectors_fn,
-                sparse_query_fn=sparse_vectors_fn,
+                sparse_doc_fn=sparse_doc_vectors,
+                sparse_query_fn=sparse_query_vectors,
             )
             vector_stores.append(vector_store)
         

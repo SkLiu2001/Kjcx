@@ -38,7 +38,7 @@ def post_run():
 
     reranker_args = {'model': '/home/liusk-s24/data/model/bce-embedding',  # 替换为本地路径
                      'top_n': 5,
-                     "device":"cuda:2"}
+                     "device":"cuda:1"}
     reranker = BCERerank(**reranker_args)
 
     # 初始化 数据ingestion pipeline 和 vector store
@@ -129,5 +129,5 @@ async def main(llm,reranker,retrievers):
                 
 
 if __name__ == "__main__":
-    post_run()
-    asyncio.run(main())
+    llm,reranker,retrievers =post_run()
+    asyncio.run(main(llm,reranker,retrievers))
