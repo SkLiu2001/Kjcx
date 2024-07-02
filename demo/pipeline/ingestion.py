@@ -7,7 +7,8 @@ from llama_index.core.vector_stores.types import BasePydanticVectorStore
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import Document, MetadataMode
 from llama_index.vector_stores.qdrant import QdrantVectorStore
-from qdrant_client import AsyncQdrantClient, models
+from llama_index.core.vector_stores import VectorStoreQueryResult
+from qdrant_client import AsyncQdrantClient, models,QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from custom.template import SUMMARY_EXTRACT_TEMPLATE
@@ -16,6 +17,8 @@ from custom.transformation import CustomFilePathExtractor, CustomTitleExtractor
 from typing import Any, List, Tuple
 import torch
 from transformers import AutoTokenizer, AutoModelForMaskedLM
+
+from tqdm import tqdm
 
 def read_data(path: str = "data") -> list[Document]:
     print("path",path)
@@ -30,66 +33,73 @@ def read_data(path: str = "data") -> list[Document]:
 
 
 
-# sparse_tokenizer = AutoTokenizer.from_pretrained(
-#     "BAAI/bge-m3"
-# )
-# sparse_model = AutoModelForMaskedLM.from_pretrained(
-#     "BAAI/bge-m3"
-# )
+sparse_tokenizer = AutoTokenizer.from_pretrained(
+    "/home/liusk-s24/data/model/bge_m3"
+)
+sparse_model = AutoModelForMaskedLM.from_pretrained(
+    "/home/liusk-s24/data/model/bge_m3"
+)
 
 
-def sparse_vectors_fn(
-    texts: List[str],
-) -> Tuple[List[List[int]], List[List[float]]]:
+# def sparse_vectors_fn(
+#     texts: List[str],
+# ) -> Tuple[List[List[int]], List[List[float]]]:
+#     """
+#     Computes vectors from logits and attention mask using ReLU, log, and max operations.
+#     """
+#     tokens = sparse_tokenizer(
+#         texts, truncation=True, padding=True, return_tensors="pt"
+#     )
+#     if torch.cuda.is_available():
+#         tokens = tokens.to("cpu")
+
+#     output = sparse_model(**tokens)
+#     logits, attention_mask = output.logits, tokens.attention_mask
+#     relu_log = torch.log(1 + torch.relu(logits))
+#     weighted_log = relu_log * attention_mask.unsqueeze(-1)
+#     tvecs, _ = torch.max(weighted_log, dim=1)
+
+#     # extract the vectors that are non-zero and their indices
+#     indices = []
+#     vecs = []
+#     for batch in tvecs:
+#         indices.append(batch.nonzero(as_tuple=True)[0].tolist())
+#         vecs.append(batch[indices[-1]].tolist())
+
+#     return indices, vecs
+
+
+def sparse_vectors_fn(texts: List[str], batch_size: int = 1) -> Tuple[List[List[int]], List[List[float]]]:
     """
     Computes vectors from logits and attention mask using ReLU, log, and max operations.
     """
-    tokens = sparse_tokenizer(
-        texts, truncation=True, padding=True, return_tensors="pt"
-    )
-    if torch.cuda.is_available():
-        tokens = tokens.to("cuda:0")
-
-    output = sparse_model(**tokens)
-    logits, attention_mask = output.logits, tokens.attention_mask
-    relu_log = torch.log(1 + torch.relu(logits))
-    weighted_log = relu_log * attention_mask.unsqueeze(-1)
-    tvecs, _ = torch.max(weighted_log, dim=1)
-
-    # extract the vectors that are non-zero and their indices
     indices = []
     vecs = []
-    for batch in tvecs:
-        indices.append(batch.nonzero(as_tuple=True)[0].tolist())
-        vecs.append(batch[indices[-1]].tolist())
 
-    return indices, vecs
-
-
-def sparse_vectors_fn(
-    texts: List[str],
-) -> Tuple[List[List[int]], List[List[float]]]:
-    """
-    Computes vectors from logits and attention mask using ReLU, log, and max operations.
-    """
-    tokens = sparse_tokenizer(
-        texts, truncation=True, padding=True, return_tensors="pt"
-    )
     if torch.cuda.is_available():
-        tokens = tokens.to("cuda:0")
+        sparse_model.to("cuda:1")
 
-    output = sparse_model(**tokens)
-    logits, attention_mask = output.logits, tokens.attention_mask
-    relu_log = torch.log(1 + torch.relu(logits))
-    weighted_log = relu_log * attention_mask.unsqueeze(-1)
-    tvecs, _ = torch.max(weighted_log, dim=1)
+    for i in tqdm(range(0, len(texts), batch_size)):
+        batch_texts = texts[i:i + batch_size]
+        tokens = sparse_tokenizer(
+            batch_texts, truncation=True, padding=True, return_tensors="pt"
+        )
+        if torch.cuda.is_available():
+            tokens = {key: value.to("cuda:1") for key, value in tokens.items()}
 
-    # extract the vectors that are non-zero and their indices
-    indices = []
-    vecs = []
-    for batch in tvecs:
-        indices.append(batch.nonzero(as_tuple=True)[0].tolist())
-        vecs.append(batch[indices[-1]].tolist())
+        output = sparse_model(**tokens)
+        logits, attention_mask = output.logits, tokens['attention_mask']
+        relu_log = torch.log(1 + torch.relu(logits))
+        weighted_log = relu_log * attention_mask.unsqueeze(-1)
+        tvecs, _ = torch.max(weighted_log, dim=1)
+
+        for batch in tvecs:
+            indices.append(batch.nonzero(as_tuple=True)[0].tolist())
+            vecs.append(batch[indices[-1]].tolist())
+
+        # 释放不再需要的张量
+        del tokens, output, logits, attention_mask, relu_log, weighted_log, tvecs
+        torch.cuda.empty_cache()
 
     return indices, vecs
 
@@ -116,10 +126,15 @@ def build_pipeline(
     return IngestionPipeline(transformations=transformation, vector_store=vector_store)
 
 
-async def build_vector_store(
+def build_vector_store(
     config: dict, reindex: bool = False,is_doc:bool =False
 ) -> tuple[AsyncQdrantClient, QdrantVectorStore]:
-    client = AsyncQdrantClient(
+    # client = AsyncQdrantClient(
+    #     # url=config["QDRANT_URL"],
+    #     #location=":memory:"
+    #     path="vs"
+    # )
+    client = QdrantClient(
         # url=config["QDRANT_URL"],
         #location=":memory:"
         path="vs"
@@ -128,29 +143,35 @@ async def build_vector_store(
         collection_name = config["COLLECTION_NAME"] 
         if reindex:
             try:
-                await client.delete_collection(config["COLLECTION_NAME"] or "aiops24")
+                client.delete_collection(config["COLLECTION_NAME"] or "aiops24")
             except UnexpectedResponse as e:
                 print(f"Collection not found: {e}")
 
         try:
             # Check if the collection exists
-            await client.get_collection(collection_name)
-            print("Collection already exists")
-        except UnexpectedResponse:
+            client.get_collection(collection_name)
+            print(f"{collection_name} already exists")
+        except ValueError as e:
             # If the collection does not exist, create it
-            await client.create_collection(
-                collection_name=collection_name,
-                vectors_config=models.VectorParams(
-                    size=config["VECTOR_SIZE"] or 1024, distance=models.Distance.DOT
-                ),
-            )
-            print("Collection created")
+            client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config={
+                        "text-dense":models.VectorParams(size=config["VECTOR_SIZE"] or 1024, distance=models.Distance.DOT)
+                        },
+                    sparse_vectors_config={
+                        "text-sparse-new": models.SparseVectorParams(index=models.SparseIndexParams())
+                    },
+                )
+            print(f"{collection_name} created")
         return client, QdrantVectorStore(
-            aclient=client,
-            collection_name=config["COLLECTION_NAME"] or "aiops24",
-            parallel=4,
-            batch_size=32,
-        )
+                client  = client,
+                collection_name=collection_name,
+                parallel=4,
+                batch_size=32,
+                enable_hybrid=True,
+                sparse_doc_fn=sparse_vectors_fn,
+                sparse_query_fn=sparse_vectors_fn,
+            )
     else:
         collection_names = [
         config["COLLECTION_NAME"] + "director",
@@ -162,39 +183,42 @@ async def build_vector_store(
         for collection_name in collection_names:
             if reindex:
                 try:
-                    await client.delete_collection(collection_name)
+                    client.delete_collection(collection_name)
                 except UnexpectedResponse as e:
-                    print(f"Collection not found: {e}")
+                    print(f"{collection_name} not found: {e}")
 
             try:
                 # Check if the collection exists
-                await client.get_collection(collection_name)
+                client.get_collection(collection_name)
                 print(f"Collection {collection_name} already exists")
             except ValueError as e:
                 # If the collection does not exist, create it
                 print(f"Unexpected response when checking collection {collection_name}: {e}")
-                await client.create_collection(
+                client.create_collection(
                     collection_name=collection_name,
-                    vectors_config=models.VectorParams(
-                        size=config["VECTOR_SIZE"] or 1024, distance=models.Distance.DOT
-                    ),
+                    vectors_config={
+                        "text-dense":models.VectorParams(size=config["VECTOR_SIZE"] or 1024, distance=models.Distance.DOT)
+                        },
+                    sparse_vectors_config={
+                        "text-sparse-new": models.SparseVectorParams(index=models.SparseIndexParams())
+                    },
                 )
                 print(f"Collection {collection_name} created")
-            vector_store = QdrantVectorStore(
-                aclient=client,
-                collection_name=collection_name,
-                parallel=4,
-                batch_size=32,
-            )
             # vector_store = QdrantVectorStore(
             #     aclient=client,
             #     collection_name=collection_name,
             #     parallel=4,
             #     batch_size=32,
-            #     enable_hybrid=True,
-            #     sparse_doc_fn=sparse_vectors_fn,
-            #     sparse_query_fn=sparse_vectors_fn,
             # )
+            vector_store = QdrantVectorStore(
+                client  = client,
+                collection_name=collection_name,
+                parallel=4,
+                batch_size=32,
+                enable_hybrid=True,
+                sparse_doc_fn=sparse_vectors_fn,
+                sparse_query_fn=sparse_vectors_fn,
+            )
             vector_stores.append(vector_store)
         
         return client, vector_stores

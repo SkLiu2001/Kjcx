@@ -5,6 +5,8 @@ from llama_index.core.llms.llm import LLM
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from llama_index.core.postprocessor.types import BaseNodePostprocessor
 from llama_index.core.vector_stores import VectorStoreQuery
+from llama_index.core.vector_stores.types import VectorStoreQueryMode
+
 from llama_index.core import (
     QueryBundle,
     PromptTemplate,
@@ -33,8 +35,17 @@ class QdrantRetriever(BaseRetriever):
 
     async def _aretrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
         query_embedding = self._embed_model.get_query_embedding(query_bundle.query_str)
+        # vector_store_query = VectorStoreQuery(
+        #     query_embedding, similarity_top_k=self._similarity_top_k
+        # )
         vector_store_query = VectorStoreQuery(
-            query_embedding, similarity_top_k=self._similarity_top_k
+            query_embedding=query_embedding, 
+            query_str= query_bundle.query_str,
+            similarity_top_k=self._similarity_top_k,
+            sparse_top_k = self._similarity_top_k,
+            mode=VectorStoreQueryMode.HYBRID,
+            alpha=0.5,
+            hybrid_top_k=self._similarity_top_k
         )
         query_result = await self._vector_store.aquery(vector_store_query)
 
@@ -45,8 +56,17 @@ class QdrantRetriever(BaseRetriever):
 
     def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
         query_embedding = self._embed_model.get_query_embedding(query_bundle.query_str)
+        # vector_store_query = VectorStoreQuery(
+        #     query_embedding, similarity_top_k=self._similarity_top_k
+        # )
         vector_store_query = VectorStoreQuery(
-            query_embedding, similarity_top_k=self._similarity_top_k
+            query_embedding=query_embedding, 
+            query_str= query_bundle.query_str,
+            similarity_top_k=self._similarity_top_k,
+            sparse_top_k = self._similarity_top_k,
+            mode=VectorStoreQueryMode.HYBRID,
+            alpha=0.5,
+            hybrid_top_k=self._similarity_top_k
         )
         query_result = self._vector_store.query(vector_store_query)
 
@@ -66,7 +86,7 @@ async def generation_with_knowledge_retrieval(
     progress=None,
 ) -> CompletionResponse:
     query_bundle = QueryBundle(query_str=query_str)
-    node_with_scores = await retriever.aretrieve(query_bundle)
+    node_with_scores = retriever.retrieve(query_bundle)
     if debug:
         print(f"retrieved:\n{node_with_scores}\n------")
     if reranker:
@@ -80,7 +100,7 @@ async def generation_with_knowledge_retrieval(
         context_str=context_str, query_str=query_str
     )
     ret = await llm.acomplete(fmt_qa_prompt)
-    if progress:
-        progress.update(1)
+    # if progress:
+    #     progress.update(1)
     return ret,context_str
 
