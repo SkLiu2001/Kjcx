@@ -63,9 +63,9 @@ class QdrantRetriever(BaseRetriever):
             query_embedding=query_embedding, 
             query_str= query_bundle.query_str,
             similarity_top_k=self._similarity_top_k,
-            sparse_top_k = self._similarity_top_k,
+            sparse_top_k = 10,
             mode=VectorStoreQueryMode.HYBRID,
-            alpha=0.5,
+            alpha=0.1,
             hybrid_top_k=self._similarity_top_k
         )
         query_result = self._vector_store.query(vector_store_query)
