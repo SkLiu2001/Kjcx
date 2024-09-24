@@ -203,3 +203,6 @@ demo/vs
 demo/data.zip
 demo/models--maidalun1020--bce-embedding-base_v1
 demo/.locks
+demo/data_1
+demo/.vscode
+local

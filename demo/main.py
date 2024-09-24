@@ -17,8 +17,8 @@ def post_run():
     config = dotenv_values(".env")
     llm = OpenAI(
         api_key=config["GLM_KEY"],
-        model="glm-4",
-        api_base="https://open.bigmodel.cn/api/paas/v4/",
+        model="deepseek-chat",
+        api_base="https://api.deepseek.com",
         is_chat_model=True,
     )
     # embeding = HuggingFaceEmbedding(
@@ -36,7 +36,7 @@ def post_run():
     Settings.embed_model = embeding
     # Settings
 
-    reranker_args = {'model': '/home/liusk-s24/data/model/bce-embedding',  # 替换为本地路径
+    reranker_args = {'model': '/home/liusk-s24/data/model/bce-reranker-base_v1',  # 替换为本地路径
                      'top_n': 5,
                      "device":"cuda:1"}
     reranker = BCERerank(**reranker_args)
@@ -57,17 +57,18 @@ def post_run():
             pipeline = build_pipeline(llm, embeding, vector_store=vector_store)
             # 暂时停止实时索引
             client.update_collection(
-                collection_name=config["COLLECTION_NAME"] or "aiops24",
+                collection_name=config["COLLECTION_NAME"],
                 optimizer_config=models.OptimizersConfigDiff(indexing_threshold=0),
             )
             pipeline.run(documents=data, show_progress=True, num_workers=1)
             # 恢复实时索引
             client.update_collection(
-                collection_name=config["COLLECTION_NAME"] or "aiops24",
+                collection_name=config["COLLECTION_NAME"],
                 optimizer_config=models.OptimizersConfigDiff(indexing_threshold=20000),
             )
             print(len(data))
-            return llm,reranker,retrievers
+        retriever = QdrantRetriever(vector_store, embeding, similarity_top_k=3)
+        return llm,reranker,retriever
     else:
         print('doc class')
         client, vector_stores = build_vector_store(config, reindex=False,is_doc=True)
@@ -98,7 +99,6 @@ def post_run():
             retriever = QdrantRetriever(vector_store, embeding, similarity_top_k=50)
             retrievers[doc] = retriever
         # retriever = QdrantRetriever(vector_store, embeding, similarity_top_k=3)
-        retriever = QdrantRetriever(vector_store, embeding, similarity_top_k=50)
         return llm,reranker,retrievers
         
 async def main(llm,reranker,retrievers):
@@ -125,7 +125,7 @@ async def main(llm,reranker,retrievers):
             recalls.append(recall)
 
         # 处理结果
-    save_answers(queries, results, recalls,"submit_hybrid.jsonl")
+    save_answers(queries, results, recalls,"submit_hybrid_0705.jsonl")
                 
 
 if __name__ == "__main__":

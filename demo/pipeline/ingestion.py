@@ -18,6 +18,8 @@ from typing import Any, List, Tuple
 import torch
 from transformers import AutoTokenizer, AutoModelForMaskedLM
 from FlagEmbedding import BGEM3FlagModel
+import textract
+import os
 
 from tqdm import tqdm
 
@@ -27,11 +29,28 @@ def read_data(path: str = "data") -> list[Document]:
         input_dir=path,
         recursive=True,
         required_exts=[
-            ".txt",
+            ".pdf",
         ],
     )
     return reader.load_data()
 
+# def read_data(path: str = "data") -> list[Document]:
+#     print("path", path)
+
+#     # 获取目录中的所有 .doc 文件
+#     doc_files = []
+#     for root, dirs, files in os.walk(path):
+#         for file in files:
+#             if file.endswith(".doc"):
+#                 doc_files.append(os.path.join(root, file))
+
+#     # 使用 textract 读取每个 .doc 文件的内容
+#     documents = []
+#     for doc_file in doc_files:
+#         text = textract.process(doc_file)
+#         documents.append(Document(text.decode('utf-8')))
+
+#     return documents
 
 
 # sparse_tokenizer = AutoTokenizer.from_pretrained(
@@ -213,7 +232,7 @@ def build_pipeline(
     vector_store: BasePydanticVectorStore = None,
 ) -> IngestionPipeline:
     transformation = [
-        SentenceSplitter(chunk_size=1024, chunk_overlap=50),
+        SentenceSplitter(chunk_size=4096, chunk_overlap=50),
         CustomTitleExtractor(metadata_mode=MetadataMode.EMBED),
         CustomFilePathExtractor(last_path_length=4, metadata_mode=MetadataMode.EMBED),
         # SummaryExtractor(
