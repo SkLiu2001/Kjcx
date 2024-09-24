@@ -23,6 +23,23 @@ import os
 
 from tqdm import tqdm
 
+def content_segmentation(data:list[Document]):
+    new_data = []
+    new_data.append(data[0])
+    flag_cx = 0
+    for doc in data:
+        if "查新点与查新要求" in doc.text:
+            new_data[0].text = "查新点与查新要求:" + doc.text.split("查新点与查新要求")[1]
+            flag_cx = 1
+        if flag_cx == 1:
+            new_data[0].text = new_data[0].text + doc.text
+            if "中英文关键词" in doc.text:
+                new_data[0].text = new_data[0].text.split("中英文关键词")[0]
+                flag_cx = 2
+    if flag_cx == 2:
+        return new_data
+    return data
+
 def read_data(path: str = "data") -> list[Document]:
     print("path",path)
     reader = SimpleDirectoryReader(
@@ -32,25 +49,9 @@ def read_data(path: str = "data") -> list[Document]:
             ".pdf",
         ],
     )
-    return reader.load_data()
-
-# def read_data(path: str = "data") -> list[Document]:
-#     print("path", path)
-
-#     # 获取目录中的所有 .doc 文件
-#     doc_files = []
-#     for root, dirs, files in os.walk(path):
-#         for file in files:
-#             if file.endswith(".doc"):
-#                 doc_files.append(os.path.join(root, file))
-
-#     # 使用 textract 读取每个 .doc 文件的内容
-#     documents = []
-#     for doc_file in doc_files:
-#         text = textract.process(doc_file)
-#         documents.append(Document(text.decode('utf-8')))
-
-#     return documents
+    data = reader.load_data()
+    data = content_segmentation(data)
+    return data
 
 
 # sparse_tokenizer = AutoTokenizer.from_pretrained(
@@ -256,8 +257,8 @@ def build_vector_store(
     # )
     client = QdrantClient(
         # url=config["QDRANT_URL"],
-        #location=":memory:"
-        path="vs"
+        location=":memory:"
+        #path="vs"
     )
     if (is_doc == False):
         collection_name = config["COLLECTION_NAME"] 
